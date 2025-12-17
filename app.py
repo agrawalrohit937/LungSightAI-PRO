@@ -3,14 +3,9 @@ import gc
 import cv2
 import numpy as np
 import datetime
-import tensorflow as tf
 
 from flask import Flask, render_template, request, jsonify, send_file
 from flask_sqlalchemy import SQLAlchemy
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing import image
-from tensorflow.keras import layers
-from tensorflow.keras.applications.resnet50 import preprocess_input
 from fpdf import FPDF
 
 # ---------------- SYSTEM SAFETY ----------------
@@ -24,15 +19,11 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
 # ---------------- PATHS ----------------
-MODEL_PATH = "models/ResNet50_TL_best.keras"
 UPLOAD_FOLDER = "static/uploads"
 REPORT_FOLDER = "static/reports"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(REPORT_FOLDER, exist_ok=True)
-
-# ---------------- CLASS NAMES ----------------
-CLASS_NAMES = ["COVID19", "NORMAL", "PNEUMONIA"]
 
 # ---------------- DATABASE MODEL ----------------
 class ScanRecord(db.Model):
@@ -47,32 +38,10 @@ class ScanRecord(db.Model):
 with app.app_context():
     db.create_all()
 
-# ---------------- LOAD MODEL (LAMBDA SAFE) ----------------
-print("⚡ Loading Neural Network System...")
-
-model = load_model(
-    MODEL_PATH,
-    custom_objects={"preprocess_input": preprocess_input},
-    compile=False
-)
-
-print("✅ Model Loaded Successfully")
-
-# ------------------------------------------------------------------
-# 🚫 GRAD-CAM DISABLED (VERY IMPORTANT FOR RENDER FREE TIER)
-# ------------------------------------------------------------------
-# Render Free (512MB) me ResNet50 + GradCAM = OOM
-# Isliye grad_model ko forcefully None rakh rahe hain
-
-grad_model = None
-print("⚠️ Grad-CAM TEMPORARILY DISABLED FOR FREE TIER")
-
-# ---------------- HELPER FUNCTIONS ----------------
-def generate_gradcam(img_array, class_index):
-    """
-    Free tier ke liye blank heatmap return karega
-    """
-    return np.zeros((224, 224))
+# ---------------- AI MODEL DISABLED ----------------
+# Render free tier demo mode
+model = None
+print("⚠️ AI prediction disabled (UI demo mode – free tier memory limits)")
 
 # ---------------- ROUTES ----------------
 @app.route("/")
@@ -86,61 +55,19 @@ def dashboard():
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
-    try:
-        file = request.files["file"]
-        name = request.form["name"]
-        age = int(request.form["age"])
-
-        filename = f"{datetime.datetime.now().timestamp()}_{file.filename}"
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(filepath)
-
-        # -------- PREPROCESS (MODEL HANDLE KARTA HAI) --------
-        img = image.load_img(filepath, target_size=(224, 224))
-        img_array = np.expand_dims(image.img_to_array(img), axis=0)
-
-        # -------- PREDICTION --------
-        preds = model.predict(img_array, verbose=0)[0]
-        class_index = int(np.argmax(preds))
-        confidence = float(preds[class_index])
-        prediction = CLASS_NAMES[class_index]
-
-        # -------- DUMMY GRAD-CAM OVERLAY (BLANK) --------
-        original = cv2.imread(filepath)
-        blank_heatmap = np.zeros_like(original)
-        overlay = cv2.addWeighted(original, 1.0, blank_heatmap, 0.0, 0)
-
-        overlay_name = f"gradcam_{filename}"
-        overlay_path = os.path.join(UPLOAD_FOLDER, overlay_name)
-        cv2.imwrite(overlay_path, overlay)
-
-        # -------- SAVE TO DB --------
-        record = ScanRecord(
-            patient_name=name,
-            age=age,
-            prediction=prediction,
-            confidence=round(confidence * 100, 2),
-            image_path=filename
+    """
+    Prediction intentionally disabled on live demo.
+    """
+    return jsonify({
+        "status": "error",
+        "title": "AI Inference Disabled",
+        "message": (
+            "Real-time AI prediction is temporarily disabled on the live demo "
+            "due to free-tier server memory limits.\n\n"
+            "✔ Full prediction and Grad-CAM work correctly in local / paid environments.\n"
+            "✔ This deployment showcases UI, workflow, and system design."
         )
-        db.session.add(record)
-        db.session.commit()
-
-        # -------- MEMORY CLEANUP --------
-        del img_array, preds, overlay
-        gc.collect()
-
-        return jsonify({
-            "status": "success",
-            "prediction": prediction,
-            "confidence": round(confidence * 100, 2),
-            "original_url": filepath,
-            "overlay_url": overlay_path,
-            "record_id": record.id
-        })
-
-    except Exception as e:
-        print("❌ Error:", e)
-        return jsonify({"status": "error", "message": str(e)})
+    }), 503
 
 @app.route("/download_report/<int:record_id>")
 def download_report(record_id):
