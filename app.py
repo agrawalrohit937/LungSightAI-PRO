@@ -31,7 +31,7 @@ REPORT_FOLDER = "static/reports"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(REPORT_FOLDER, exist_ok=True)
 
-# ---------------- CLASS NAMES (MUST MATCH TRAINING) ----------------
+# ---------------- CLASS NAMES ----------------
 CLASS_NAMES = ["COVID19", "NORMAL", "PNEUMONIA"]
 
 # ---------------- DATABASE MODEL ----------------
@@ -58,40 +58,21 @@ model = load_model(
 
 print("✅ Model Loaded Successfully")
 
-# ---------------- GRAD-CAM (GLOBAL, RAM SAFE) ----------------
-try:
-    last_conv_layer_name = next(
-        layer.name for layer in reversed(model.layers)
-        if isinstance(layer, layers.Conv2D)
-    )
+# ------------------------------------------------------------------
+# 🚫 GRAD-CAM DISABLED (VERY IMPORTANT FOR RENDER FREE TIER)
+# ------------------------------------------------------------------
+# Render Free (512MB) me ResNet50 + GradCAM = OOM
+# Isliye grad_model ko forcefully None rakh rahe hain
 
-    grad_model = tf.keras.models.Model(
-        [model.inputs],
-        [model.get_layer(last_conv_layer_name).output, model.output]
-    )
-    print("✅ Grad-CAM Initialized")
-
-except Exception as e:
-    print("⚠️ Grad-CAM Disabled:", e)
-    grad_model = None
+grad_model = None
+print("⚠️ Grad-CAM TEMPORARILY DISABLED FOR FREE TIER")
 
 # ---------------- HELPER FUNCTIONS ----------------
 def generate_gradcam(img_array, class_index):
-    if grad_model is None:
-        return np.zeros((224, 224))
-
-    with tf.GradientTape() as tape:
-        conv_outputs, predictions = grad_model(img_array)
-        loss = predictions[:, class_index]
-
-    grads = tape.gradient(loss, conv_outputs)
-    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-    conv_outputs = conv_outputs[0]
-
-    heatmap = tf.reduce_sum(conv_outputs * pooled_grads, axis=-1)
-    heatmap = tf.maximum(heatmap, 0) / (tf.reduce_max(heatmap) + 1e-8)
-
-    return heatmap.numpy()
+    """
+    Free tier ke liye blank heatmap return karega
+    """
+    return np.zeros((224, 224))
 
 # ---------------- ROUTES ----------------
 @app.route("/")
@@ -114,7 +95,7 @@ def analyze():
         filepath = os.path.join(UPLOAD_FOLDER, filename)
         file.save(filepath)
 
-        # -------- PREPROCESS (NO MANUAL preprocess_input HERE) --------
+        # -------- PREPROCESS (MODEL HANDLE KARTA HAI) --------
         img = image.load_img(filepath, target_size=(224, 224))
         img_array = np.expand_dims(image.img_to_array(img), axis=0)
 
@@ -124,15 +105,11 @@ def analyze():
         confidence = float(preds[class_index])
         prediction = CLASS_NAMES[class_index]
 
-        # -------- GRAD-CAM --------
-        heatmap = generate_gradcam(img_array, class_index)
+        # -------- DUMMY GRAD-CAM OVERLAY (BLANK) --------
         original = cv2.imread(filepath)
+        blank_heatmap = np.zeros_like(original)
+        overlay = cv2.addWeighted(original, 1.0, blank_heatmap, 0.0, 0)
 
-        heatmap = cv2.resize(heatmap, (original.shape[1], original.shape[0]))
-        heatmap = np.uint8(255 * heatmap)
-        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-
-        overlay = cv2.addWeighted(original, 0.6, heatmap, 0.4, 0)
         overlay_name = f"gradcam_{filename}"
         overlay_path = os.path.join(UPLOAD_FOLDER, overlay_name)
         cv2.imwrite(overlay_path, overlay)
@@ -149,9 +126,8 @@ def analyze():
         db.session.commit()
 
         # -------- MEMORY CLEANUP --------
-        del img_array, preds, heatmap, overlay
+        del img_array, preds, overlay
         gc.collect()
-        tf.keras.backend.clear_session()
 
         return jsonify({
             "status": "success",
@@ -186,10 +162,6 @@ def download_report(record_id):
     pdf.cell(200, 10, f"Diagnosis: {record.prediction}", ln=True)
     pdf.set_font("Arial", size=12)
     pdf.cell(200, 10, f"Confidence: {record.confidence}%", ln=True)
-
-    img_path = os.path.join(UPLOAD_FOLDER, f"gradcam_{record.image_path}")
-    if os.path.exists(img_path):
-        pdf.image(img_path, x=10, y=120, w=100)
 
     report_path = os.path.join(REPORT_FOLDER, f"report_{record_id}.pdf")
     pdf.output(report_path)
