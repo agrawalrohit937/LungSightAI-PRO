@@ -1,9 +1,5 @@
 import os
-import gc
-import cv2
-import numpy as np
 import datetime
-
 from flask import Flask, render_template, request, jsonify, send_file
 from flask_sqlalchemy import SQLAlchemy
 from fpdf import FPDF
@@ -38,10 +34,8 @@ class ScanRecord(db.Model):
 with app.app_context():
     db.create_all()
 
-# ---------------- AI MODEL DISABLED ----------------
-# Render free tier demo mode
-model = None
-print("⚠️ AI prediction disabled (UI demo mode – free tier memory limits)")
+# ---------------- AI DISABLED (DEMO MODE) ----------------
+print("⚠️ AI prediction disabled (Render free-tier demo mode)")
 
 # ---------------- ROUTES ----------------
 @app.route("/")
@@ -56,16 +50,16 @@ def dashboard():
 @app.route("/analyze", methods=["POST"])
 def analyze():
     """
-    Prediction intentionally disabled on live demo.
+    Demo mode: inference intentionally disabled
     """
     return jsonify({
         "status": "error",
         "title": "AI Inference Disabled",
         "message": (
-            "Real-time AI prediction is temporarily disabled on the live demo "
+            "Real-time AI prediction is temporarily unavailable on the live demo "
             "due to free-tier server memory limits.\n\n"
-            "✔ Full prediction and Grad-CAM work correctly in local / paid environments.\n"
-            "✔ This deployment showcases UI, workflow, and system design."
+            "✔ Full prediction and Grad-CAM work correctly in local or paid environments.\n"
+            "✔ This deployment demonstrates UI, workflow, and system design."
         )
     }), 503
 
